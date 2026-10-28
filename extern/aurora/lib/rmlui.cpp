@@ -1,6 +1,7 @@
 #include "rmlui.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <thread>
 
@@ -26,6 +27,10 @@ FileInterface_SDL* g_fileInterface = nullptr;
 namespace {
 Module Log("aurora::rmlui");
 constexpr size_t MaxTrackedTouches = 16;
+
+// Moltiplicatore di scala per adattare la UI agli schermi Retina di iPhone.
+// 0.5f dimezza la grandezza (es. da 3.0x a 1.5x). Riduci a 0.4f se ancora troppo grande.
+constexpr float kMobileScaleFactor = 0.5f;
 
 struct TrackedTouch {
   SDL_FingerID id = 0;
@@ -66,8 +71,9 @@ void sync_context_metrics(Rml::Vector2i dimensions) noexcept {
   if (g_context->GetDimensions() != dimensions) {
     g_context->SetDimensions(dimensions);
   }
-  const float ratio = s_uiScale > 0.0f ? s_uiScale : window::get_window_size().scale;
-  if (g_context->GetDensityIndependentPixelRatio() != ratio) {
+  const float baseRatio = s_uiScale > 0.0f ? s_uiScale : window::get_window_size().scale;
+  const float ratio = std::clamp(baseRatio * kMobileScaleFactor, 0.1f, 4.0f);
+  if (std::fabs(g_context->GetDensityIndependentPixelRatio() - ratio) > 1e-4f) {
     g_context->SetDensityIndependentPixelRatio(ratio);
   }
 }
@@ -384,7 +390,12 @@ Rml::Context* get_context() noexcept { return g_context; }
 
 bool is_initialized() noexcept { return g_context != nullptr; }
 
-void set_ui_scale(float scale) noexcept { s_uiScale = scale > 0.0f ? std::clamp(scale, 0.25f, 4.0f) : 0.0f; }
+void set_ui_scale(float scale) noexcept {
+  s_uiScale = scale > 0.0f ? std::clamp(scale, 0.1f, 4.0f) : 0.0f;
+  if (g_context != nullptr) {
+    sync_context_metrics(g_context->GetDimensions());
+  }
+}
 
 float get_ui_scale() noexcept { return s_uiScale; }
 
@@ -489,6 +500,8 @@ void shutdown() noexcept {
 
   Rml::Shutdown();
   Backend::Shutdown();
+  delete g_fileInterface;
+  g_fileInterface = nullptr;
   g_context = nullptr;
   s_renderTarget = {};
   s_renderTargetCopyBindGroup = {};
